@@ -130,7 +130,7 @@ class ParsersAndRulesTest {
             "pm uninstall --user 0 com.foo", "pm clear com.foo", "reboot", "pm disable-user com.foo",
             "settings put global airplane_mode_on 1", "settings put global window_animation_scale 50",
             "settings put secure bluetooth_on 0", "svc wifi disable", "pm disable-user --user 0 com.foo; reboot",
-            "am start -n com.evil/.Main", "pm enable --user 0 com.foo && reboot",
+            "am start -n com.evil/.Main -d tel:911", "pm enable --user 0 com.foo && reboot",
         ).forEach { assertFalse(it, ApprovedCommand.isAllowed(it)) }
         assertNotNull(runCatching { ApprovedCommand.approve("reboot") }.exceptionOrNull())
     }
