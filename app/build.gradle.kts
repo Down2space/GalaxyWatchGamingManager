@@ -60,8 +60,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     // Wireless ADB protocol (pairing w/ 6-digit code, TLS, separate pairing/connect ports).
-    // https://github.com/MuntashirAkon/libadb-android — check Maven Central for the newest 3.x.
-    implementation("io.github.muntashirakon:libadb-android:3.0.0")
+    // https://github.com/MuntashirAkon/libadb-android (via JitPack)
+    implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
     // Required by libadb for TLS pairing (exportKeyingMaterial).
     implementation("org.conscrypt:conscrypt-android:2.5.3")
     // Self-signed certificate generation for this phone's ADB identity.

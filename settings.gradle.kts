@@ -11,6 +11,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // libadb-android is published on JitPack only; restrict JitPack to that group.
+        exclusiveContent {
+            forRepository { maven("https://jitpack.io") }
+            filter { includeGroup("com.github.MuntashirAkon") }
+        }
     }
 }
 
