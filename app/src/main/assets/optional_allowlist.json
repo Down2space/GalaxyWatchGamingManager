@@ -1,0 +1,4 @@
+{
+  "_readme": "Conservative allowlist of OPTIONAL packages that have been individually verified on an SM-R965U. It ships EMPTY on purpose: nothing may be offered for disabling until a package has been checked on your exact watch/firmware and calling/Bluetooth/LTE/Wi-Fi have been re-tested afterwards. Add entries only after verification. Protected-rule matches always win over this list.",
+  "verified": []
+}

@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Gwgm" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+    </style>
+    <color name="bg">#FF0B0B14</color>
+    <color name="ic_bg">#FF120A24</color>
+</resources>
