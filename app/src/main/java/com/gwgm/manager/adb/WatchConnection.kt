@@ -163,7 +163,22 @@ class WatchConnection(context: Context) {
         val stream = m.openStream("shell:$command")
         try {
             return callWithTimeout(timeoutMs) {
-                stream.openInputStream().bufferedReader().use { it.readText() }
+                // libadb throws IOException("Stream closed.") (from read() and available()) when the
+                // watch closes the stream after a command finishes, instead of returning -1. Read raw
+                // bytes ourselves and treat a close by the watch as normal end-of-output.
+                val input = stream.openInputStream()
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(8192)
+                while (true) {
+                    val n = try {
+                        input.read(buf, 0, buf.size)
+                    } catch (e: IOException) {
+                        if (stream.isClosed) -1 else throw e
+                    }
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                }
+                out.toString(Charsets.UTF_8.name())
             }.replace("\r", "")
         } finally {
             // Also unblocks the reader thread if we timed out.

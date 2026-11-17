@@ -13,8 +13,8 @@ android {
         // Android 11+ is required on the PHONE for TLS wireless-debugging pairing.
         minSdk = 30
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0-phase4"
+        versionCode = 5
+        versionName = "0.4.1-phase4"
     }
 
     buildTypes {
