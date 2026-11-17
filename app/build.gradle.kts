@@ -65,7 +65,7 @@ dependencies {
     // Required by libadb for TLS pairing (exportKeyingMaterial).
     implementation("org.conscrypt:conscrypt-android:2.5.3")
     // Self-signed certificate generation for this phone's ADB identity.
-    implementation("org.bouncycastle:bcpkix-jdk18on:1.79")
+    implementation("org.bouncycastle:bcpkix-jdk15to18:1.81") // matches the bcprov libadb pulls in
 
     testImplementation("junit:junit:4.13.2")
 }
