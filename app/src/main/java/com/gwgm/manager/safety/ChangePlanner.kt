@@ -1,6 +1,8 @@
 package com.gwgm.manager.safety
 
 import com.gwgm.manager.adb.WatchConnection
+import com.gwgm.manager.data.ApkInfo
+import com.gwgm.manager.data.ApkInspector
 import com.gwgm.manager.data.AppEntry
 import com.gwgm.manager.data.WatchParsers
 import com.gwgm.manager.data.WatchRepository
@@ -19,6 +21,8 @@ data class ProposedChange(
     val expected: String? = null,
     /** For RESTORE: the journal entry being undone. */
     val restoresEntryId: Long? = null,
+    /** For INSTALL_APK: the APK copied into the phone app's cache. */
+    val apkPath: String? = null,
 )
 
 data class ChangeResult(val change: ProposedChange, val success: Boolean, val message: String)
@@ -141,8 +145,64 @@ class ChangePlanner(
         return out
     }
 
+    /** Phase 6: install a game APK. All compatibility checks happen on the phone first. */
+    suspend fun planInstallApk(apk: ApkInfo): ProposedChange {
+        requireConnected()
+        val props = WatchParsers.parseGetprop(conn.exec("getprop"))
+        val watchSdk = props["ro.build.version.sdk"]?.toIntOrNull()
+        if (watchSdk != null && apk.minSdk > watchSdk) throw RefusedException(
+            "${apk.label} needs Android API ${apk.minSdk}, but the watch runs API $watchSdk. It can't install."
+        )
+        if (apk.abis.isNotEmpty() && apk.abis.none { it in ApkInspector.WATCH_ABIS }) throw RefusedException(
+            "${apk.label} only contains native code for ${apk.abis.joinToString()} — the watch's processor is ARM, so it can't run."
+        )
+        val storage = WatchParsers.parseDf(conn.exec("df -k /data"))
+        if (storage != null && storage.availableKb * 1024 < apk.sizeBytes * 3) throw RefusedException(
+            "Not enough free space on the watch: the APK is ${apk.sizeBytes / 1_048_576} MB and needs roughly 3× that free during install."
+        )
+        val installed = WatchParsers.parsePackageList(conn.exec("pm list packages"))
+        val isUpdate = apk.packageName in installed
+        if (isUpdate) {
+            val (_, d) = preflight(apk.packageName)
+            if (d.second.category != AppCategory.USER) throw RefusedException(
+                "Refused: ${apk.packageName} is already on the watch as a ${d.second.category.short.lowercase()} package. Replacing system components isn't allowed."
+            )
+        }
+        val risks = buildList {
+            if (!apk.isWatchApp) add("⚠ This APK does NOT say it's made for watches. Phone games often don't fit the round screen, need gestures or hardware the watch lacks, or won't open at all. It's harmless to try and easy to uninstall.")
+            else add("Built for Wear OS (declares the watch feature).")
+            if (apk.standalone == false) add("Marked as NOT standalone: it may need a companion app on your phone to work.")
+            add("Installs as a normal user app (${apk.sizeBytes / 1_048_576} MB). System apps, calling, Bluetooth and LTE are untouched.")
+            if (isUpdate) add("Updates the existing ${apk.label} and keeps its data.")
+            add("ADB installs skip Play Protect scanning on the watch — only install APKs from sources you trust.")
+        }
+        return ProposedChange(
+            kind = ChangeKind.INSTALL_APK, target = apk.packageName,
+            title = "${if (isUpdate) "Update" else "Install"} ${apk.label} ${apk.versionName ?: ""}".trim(),
+            command = ApprovedCommand.approve("cmd package install -r -t -S ${apk.sizeBytes}"),
+            originalState = if (isUpdate) "installed (older version)" else "not installed",
+            restoreCommand = if (isUpdate) null else "pm uninstall ${apk.packageName}",
+            risks = risks,
+            restoreNotes = if (isUpdate) listOf("No automatic undo for updates (Android can't downgrade without uninstalling). You can uninstall it on the watch.")
+            else listOf("Undo: pm uninstall ${apk.packageName} (removes the game and its data). You can also uninstall it from the watch's app list."),
+            apkPath = apk.file.path,
+        )
+    }
+
+    /** Opens an app's launcher screen on the watch. Not a persistent change, so no journal entry. */
+    suspend fun launch(pkg: String) {
+        requireConnected()
+        val out = conn.exec("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER $pkg")
+        val comp = out.lines().map { it.trim() }.lastOrNull { it.startsWith("$pkg/") }
+            ?: throw RefusedException("$pkg has no screen that can be opened from the app list.")
+        val res = conn.execModifying(ApprovedCommand.approve("am start -n $comp"))
+        if (Regex("(?i)(error|exception)").containsMatchIn(res)) throw RefusedException(res.trim().take(200))
+    }
+
     fun planRestore(e: JournalEntry): ProposedChange {
         val cmd = e.restoreCommand ?: throw RefusedException("\"${e.title}\" has no restore step.")
+        if (cmd.startsWith("pm uninstall") && e.kind != ChangeKind.INSTALL_APK)
+            throw RefusedException("Uninstall is only allowed to undo an install this app made.")
         return ProposedChange(
             kind = ChangeKind.RESTORE, target = e.target, title = "Undo: ${e.title}",
             command = ApprovedCommand.approve(cmd), originalState = "changed (was: ${e.originalState})",
@@ -159,21 +219,31 @@ class ChangePlanner(
     suspend fun execute(change: ProposedChange): ChangeResult {
         // Re-run steps 1–3 against the live watch: protection rules must still allow this.
         requireConnected()
-        when (change.kind) {
-            ChangeKind.DISABLE_PACKAGE -> {
+        when {
+            change.kind == ChangeKind.DISABLE_PACKAGE -> {
                 val (_, d) = preflight(change.target)
                 if (!d.second.modifiable) throw RefusedException("Refused at execution: ${change.target} is now classified ${d.second.category.short}.")
             }
-            else -> Unit
+            change.kind == ChangeKind.RESTORE && change.command.text.startsWith("pm uninstall") -> {
+                val (_, d) = preflight(change.target)
+                if (d.second.category != AppCategory.USER) throw RefusedException("Refused: ${change.target} is no longer a plain user app.")
+            }
         }
 
         // Step 7: only the approved command.
-        val output = runCatching { conn.execModifying(change.command) }.getOrElse { e ->
+        val output = runCatching {
+            if (change.kind == ChangeKind.INSTALL_APK) {
+                val f = java.io.File(change.apkPath ?: throw RefusedException("APK file missing."))
+                if (!f.exists()) throw RefusedException("The selected APK is no longer available — pick it again.")
+                conn.installApk(f, change.command)
+            } else conn.execModifying(change.command)
+        }.getOrElse { e ->
             record(change, "ERROR: ${e.message}", false)
             return ChangeResult(change, false, "Failed to run: ${e.message}")
         }.trim()
 
-        val looksBad = Regex("(?i)(error|exception|failure|denied|not allowed|unknown)").containsMatchIn(output)
+        val looksBad = Regex("(?i)(error|exception|failure|denied|not allowed|unknown)").containsMatchIn(output) ||
+            (change.kind == ChangeKind.INSTALL_APK && !output.contains("Success"))
         val verified = !looksBad && verify(change)
         record(change, output, verified)
         val msg = when {
@@ -189,6 +259,7 @@ class ChangePlanner(
             ChangeKind.DISABLE_PACKAGE -> details(c.target).user0EnabledState == STATE_DISABLED_USER
             ChangeKind.ENABLE_PACKAGE -> details(c.target).user0EnabledState in setOf(0, 1)
             ChangeKind.INSTALL_EXISTING -> c.target in WatchParsers.parsePackageList(conn.exec("pm list packages"))
+            ChangeKind.INSTALL_APK -> c.target in WatchParsers.parsePackageList(conn.exec("pm list packages -3"))
             ChangeKind.SET_GLOBAL_SETTING -> conn.exec("settings get global ${c.target}").trim() == c.expected
             ChangeKind.KILL_BACKGROUND, ChangeKind.LAUNCH_APP -> true
             ChangeKind.RESTORE -> verifyRestore(c)
@@ -202,6 +273,7 @@ class ChangePlanner(
             t.startsWith("pm disable-user") -> details(c.target).user0EnabledState == STATE_DISABLED_USER
             t.startsWith("settings put global") -> conn.exec("settings get global ${c.target}").trim() == t.substringAfterLast(' ')
             t.startsWith("settings delete global") -> conn.exec("settings get global ${c.target}").trim() == "null"
+            t.startsWith("pm uninstall") -> c.target !in WatchParsers.parsePackageList(conn.exec("pm list packages"))
             else -> true
         }
     }

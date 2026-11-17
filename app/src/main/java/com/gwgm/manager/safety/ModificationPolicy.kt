@@ -27,7 +27,12 @@ class ApprovedCommand private constructor(val text: String) {
             Regex("settings put global ($ANIMATION_KEYS) $SCALE"),
             Regex("settings delete global ($ANIMATION_KEYS)"),
             Regex("am kill-all"),
-            Regex("am start -n ${Regex.escape(COMPANION_COMPONENT)}"),
+            // Open any app's launcher screen (doesn't change anything persistent).
+            Regex("am start -n $PKG/[A-Za-z0-9_.]+"),
+            // Install/update a user app from an APK streamed over ADB (exec: service, no shell).
+            Regex("cmd package install -r -t -S [1-9][0-9]{0,10}"),
+            // Undo of an install THIS app made (planner only allows it for journaled INSTALL_APK entries).
+            Regex("pm uninstall $PKG"),
         )
 
         private val forbiddenChars = Regex("[;&|`$<>\\\\\\n\\r]")

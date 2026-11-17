@@ -162,28 +162,55 @@ class WatchConnection(context: Context) {
         val m = manager?.takeIf { it.isConnected } ?: throw IOException("Not connected to the watch.")
         val stream = m.openStream("shell:$command")
         try {
-            return callWithTimeout(timeoutMs) {
-                // libadb throws IOException("Stream closed.") (from read() and available()) when the
-                // watch closes the stream after a command finishes, instead of returning -1. Read raw
-                // bytes ourselves and treat a close by the watch as normal end-of-output.
-                val input = stream.openInputStream()
-                val out = java.io.ByteArrayOutputStream()
-                val buf = ByteArray(8192)
-                while (true) {
-                    val n = try {
-                        input.read(buf, 0, buf.size)
-                    } catch (e: IOException) {
-                        if (stream.isClosed) -1 else throw e
-                    }
-                    if (n < 0) break
-                    out.write(buf, 0, n)
-                }
-                out.toString(Charsets.UTF_8.name())
-            }.replace("\r", "")
+            return callWithTimeout(timeoutMs) { readAll(stream) }.replace("\r", "")
         } finally {
             // Also unblocks the reader thread if we timed out.
             runCatching { stream.close() }
         }
+    }
+
+    /**
+     * Streams an APK into `cmd package install -S <size>` via the exec: service (no shell involved).
+     * Only accepts an [ApprovedCommand]; never retried automatically.
+     */
+    suspend fun installApk(apk: java.io.File, command: ApprovedCommand): String = withContext(Dispatchers.IO) {
+        val m = manager?.takeIf { it.isConnected && _state.value is ConnState.Connected }
+            ?: throw IOException("Not connected to the watch.")
+        val stream = m.openStream("exec:${command.text}")
+        try {
+            callWithTimeout(INSTALL_TIMEOUT_MS) {
+                val out = stream.openOutputStream()
+                apk.inputStream().use { it.copyTo(out, 64 * 1024) }
+                out.flush()
+                readAll(stream)
+            }.replace("\r", "").trim()
+        } catch (e: IOException) {
+            markLost(e)
+            throw IOException("Connection dropped during install. Reconnect, then check the Games tab to see whether it installed.", e)
+        } finally {
+            runCatching { stream.close() }
+        }
+    }
+
+    /**
+     * libadb throws IOException("Stream closed.") (from read() and available()) when the watch
+     * closes the stream after a command finishes, instead of returning -1. Read raw bytes ourselves
+     * and treat a close by the watch as normal end-of-output.
+     */
+    private fun readAll(stream: io.github.muntashirakon.adb.AdbStream): String {
+        val input = stream.openInputStream()
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        while (true) {
+            val n = try {
+                input.read(buf, 0, buf.size)
+            } catch (e: IOException) {
+                if (stream.isClosed) -1 else throw e
+            }
+            if (n < 0) break
+            out.write(buf, 0, n)
+        }
+        return out.toString(Charsets.UTF_8.name())
     }
 
     private fun managerLocked(): WatchAdbManager =
@@ -217,6 +244,7 @@ class WatchConnection(context: Context) {
         private const val KEY_PORT = "connect_port"
         private const val PAIR_TIMEOUT_MS = 20_000L
         private const val CONNECT_TIMEOUT_MS = 15_000L
+        private const val INSTALL_TIMEOUT_MS = 300_000L
 
         fun friendlyError(e: Throwable, pairing: Boolean): String {
             val name = e.javaClass.simpleName
@@ -233,7 +261,8 @@ class WatchConnection(context: Context) {
                 e is SSLException ->
                     if (pairing) "Pairing failed — the code was wrong or expired. Get a fresh code on the watch and try again."
                     else "Secure handshake failed. The watch may have forgotten this phone — pair again."
-                else -> e.message ?: name
+                else -> e.message ?: e.cause?.message
+                    ?: "Couldn't connect ($name). Check the IP and the full 5-digit port shown on the watch's Wireless debugging screen — the port changes whenever Wireless debugging is toggled or the watch restarts."
             }
         }
     }

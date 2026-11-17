@@ -1,6 +1,11 @@
 package com.gwgm.manager.ui
 
 import android.app.Application
+import android.net.Uri
+import com.gwgm.manager.data.ApkInfo
+import com.gwgm.manager.data.ApkInspector
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gwgm.manager.GwgmApp
@@ -68,6 +73,8 @@ data class UiState(
     val review: ReviewState? = null,
     /** Set after any successful change: the calling checklist should be run again. */
     val checklistDue: Boolean = false,
+    val pickedApk: ApkInfo? = null,
+    val launching: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -198,6 +205,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     } else _ui.update { it.copy(planning = false, review = ReviewState(heading, changes, modeAfter)) }
                 }
                 .onFailure { e -> _ui.update { it.copy(planning = false) }; say(e.message) }
+        }
+    }
+
+    // ---- Phase 6: games ---------------------------------------------------------------------
+
+    fun onApkPicked(uri: Uri) {
+        if (!c.connection.isConnected) return say("Connect to the watch first (Watch tab), then choose the APK.")
+        val ctx = getApplication<Application>()
+        viewModelScope.launch {
+            _ui.update { it.copy(planning = true) }
+            val info = runCatching {
+                withContext(Dispatchers.IO) { ApkInspector.inspect(ctx, ApkInspector.copyToCache(ctx, uri)) }
+            }.getOrElse { e -> _ui.update { it.copy(planning = false) }; return@launch say(e.message) }
+            _ui.update { it.copy(pickedApk = info, planning = false) }
+            plan("Install on watch", null) { listOf(c.planner.planInstallApk(info)) }
+        }
+    }
+
+    fun launchOnWatch(entry: AppEntry) {
+        viewModelScope.launch {
+            _ui.update { it.copy(launching = entry.packageName) }
+            runCatching { c.planner.launch(entry.packageName) }
+                .onSuccess { say("Opened ${entry.displayName} on the watch.") }
+                .onFailure { say(it.message) }
+            _ui.update { it.copy(launching = null) }
         }
     }
 

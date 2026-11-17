@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-enum class ChangeKind { DISABLE_PACKAGE, ENABLE_PACKAGE, INSTALL_EXISTING, SET_GLOBAL_SETTING, KILL_BACKGROUND, LAUNCH_APP, RESTORE }
+enum class ChangeKind { INSTALL_APK, DISABLE_PACKAGE, ENABLE_PACKAGE, INSTALL_EXISTING, SET_GLOBAL_SETTING, KILL_BACKGROUND, LAUNCH_APP, RESTORE }
 
 /** One executed change, with everything needed to understand and undo it. */
 data class JournalEntry(

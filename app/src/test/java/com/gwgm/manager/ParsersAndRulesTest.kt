@@ -135,6 +135,18 @@ class ParsersAndRulesTest {
         assertNotNull(runCatching { ApprovedCommand.approve("reboot") }.exceptionOrNull())
     }
 
+    @Test fun installAndLaunchTemplates() {
+        assertTrue(ApprovedCommand.isAllowed("cmd package install -r -t -S 12345678"))
+        assertTrue(ApprovedCommand.isAllowed("am start -n com.example.snake/.MainActivity"))
+        assertTrue(ApprovedCommand.isAllowed("am start -n com.example.snake/com.example.snake.ui.GameActivity"))
+        assertTrue(ApprovedCommand.isAllowed("pm uninstall com.example.snake"))
+        assertFalse(ApprovedCommand.isAllowed("cmd package install -S 0"))
+        assertFalse(ApprovedCommand.isAllowed("cmd package install -r -t -S 5 /sdcard/x.apk"))
+        assertFalse(ApprovedCommand.isAllowed("pm uninstall -k --user 0 com.foo"))
+        assertFalse(ApprovedCommand.isAllowed("am start -a android.intent.action.CALL -d tel:911"))
+        assertTrue(ReadOnlyCommandPolicy.isAllowed("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.snake"))
+    }
+
     @Test fun readOnlyPolicyBlocksModifying() {
         assertFalse(ReadOnlyCommandPolicy.isAllowed("pm disable-user --user 0 com.foo"))
         assertTrue(ReadOnlyCommandPolicy.isAllowed("settings get global window_animation_scale"))

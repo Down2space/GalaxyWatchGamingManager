@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
@@ -47,8 +48,9 @@ fun AppRoot(vm: MainViewModel = viewModel()) {
                     listOf(
                         Triple("Watch", Icons.Filled.Home, 0),
                         Triple("Apps", Icons.AutoMirrored.Filled.List, 1),
-                        Triple("Optimize", Icons.Filled.Star, 2),
-                        Triple("Safety", Icons.Filled.Info, 3),
+                        Triple("Games", Icons.Filled.PlayArrow, 2),
+                        Triple("Optimize", Icons.Filled.Star, 3),
+                        Triple("Safety", Icons.Filled.Info, 4),
                     ).forEach { (label, icon, idx) ->
                         NavigationBarItem(
                             selected = tab == idx,
@@ -67,10 +69,11 @@ fun AppRoot(vm: MainViewModel = viewModel()) {
                 detail != null -> PackageDetailScreen(detail, ui, vm, onBack = vm::closeDetail)
                 tab == 0 -> DashboardScreen(ui, vm)
                 tab == 1 -> InventoryScreen(ui, vm)
-                tab == 2 -> OptimizeScreen(ui, vm, openChecklist = { tab = 3 })
+                tab == 2 -> GamesScreen(ui, vm)
+                tab == 3 -> OptimizeScreen(ui, vm, openChecklist = { tab = 4 })
                 else -> SafetyScreen(ui, vm)
             }
         }
-        ui.review?.let { r -> ChangeReviewDialog(r, vm, openChecklist = { vm.closeDetail(); tab = 3 }) }
+        ui.review?.let { r -> ChangeReviewDialog(r, vm, openChecklist = { vm.closeDetail(); tab = 4 }) }
     }
 }

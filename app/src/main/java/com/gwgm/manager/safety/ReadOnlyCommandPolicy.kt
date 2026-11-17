@@ -19,6 +19,7 @@ object ReadOnlyCommandPolicy {
         Regex("cmd wifi status"),
         Regex("pm list packages( -[3sdu])?"),
         Regex("dumpsys package $PKG"),
+        Regex("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER $PKG"),
         Regex("settings get global (${ApprovedCommand.ANIMATION_KEYS})"),
     )
 
